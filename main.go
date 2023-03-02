@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"rest-queue/storage"
@@ -10,16 +11,28 @@ import (
 )
 
 const (
-	queryKey   = "v"
-	timeoutKey = "timeout"
+	queryKey    = "v"
+	timeoutKey  = "timeout"
+	defaultPort = "8080"
 )
 
-type api struct {
-	storage *storage.Storage
+type appEnv struct {
+	port string
+}
+
+func (app *appEnv) fromArgs(args []string) error {
+	fl := flag.NewFlagSet("rest-queue", flag.ContinueOnError)
+	fl.StringVar(&app.port, "port", defaultPort, "a port to run rest api on")
+	return fl.Parse(args)
 }
 
 func main() {
-	storage := storage.New()
+	var app appEnv
+	err := app.fromArgs(os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	api := &api{
 		storage,
 	}
@@ -28,7 +41,7 @@ func main() {
 	mux.Handle("/", http.HandlerFunc(api.queryHandler))
 
 	srv := &http.Server{
-		Addr:        ":8080", // TODO: add setting port from arguments
+		Addr:        fmt.Sprintf(":%s", app.port),
 		Handler:     mux,
 		ReadTimeout: time.Duration(10) * time.Second,
 		IdleTimeout: time.Duration(10) * time.Second,
