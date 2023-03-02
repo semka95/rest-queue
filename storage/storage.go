@@ -5,24 +5,27 @@ import (
 	"sync"
 )
 
-type Storage struct {
-	mu     sync.RWMutex
+// Store represents queue store
+type Store struct {
+	mu     sync.Mutex
 	queues map[string]queue
 }
 
 type queue struct {
-	items   *list.List // TODO: maybe change to slice
+	items   *list.List
 	waiters *list.List
 }
 
-func New() *Storage {
-	return &Storage{
-		sync.RWMutex{},
+// New creates Store
+func New() *Store {
+	return &Store{
+		sync.Mutex{},
 		make(map[string]queue),
 	}
 }
 
-func (s *Storage) Get(queueName string) string {
+// Get takes item from given queue and returns it
+func (s *Store) Get(queueName string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -37,7 +40,9 @@ func (s *Storage) Get(queueName string) string {
 	return elem.(string)
 }
 
-func (s *Storage) Store(queueName, value string) {
+// Store stores item to given queue. Before storing it checks if there are any waiters,
+// and if any it sends item to first waiter in the queue list
+func (s *Store) Store(queueName, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -60,11 +65,11 @@ func (s *Storage) Store(queueName, value string) {
 	s.queues[queueName] = q
 }
 
-func (s *Storage) GetChan(queueName string) *list.Element {
+// AddToWaitQueue adds channel to the wait queue and returns list element
+func (s *Store) AddToWaitQueue(queueName string, ch chan string) *list.Element {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ch := make(chan string)
 	q, ok := s.queues[queueName]
 	if !ok {
 		q = queue{
@@ -79,7 +84,8 @@ func (s *Storage) GetChan(queueName string) *list.Element {
 	return elem
 }
 
-func (s *Storage) RemoveFromWait(queueName string, elem *list.Element) {
+// RemoveFromWaitQueue removes waiter from the queue list
+func (s *Store) RemoveFromWaitQueue(queueName string, elem *list.Element) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	q, ok := s.queues[queueName]

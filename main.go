@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"rest-queue/storage"
 )
 
 const (
@@ -45,7 +47,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.HandlerFunc(api.queryHandler))
-
 	srv := &http.Server{
 		Addr:        fmt.Sprintf(":%s", app.port),
 		Handler:     mux,
@@ -88,6 +89,7 @@ func (a *api) queryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// PUT /{pet}?v=cat - stores item in pet queue
 func (a *api) putInQueue(w http.ResponseWriter, r *http.Request) {
 	queueName := strings.TrimPrefix(r.URL.Path, "/")
 
@@ -103,11 +105,13 @@ func (a *api) putInQueue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GET /{pet}?timeout=N - returns item from pet queue
 func (a *api) getFromQueue(w http.ResponseWriter, r *http.Request) {
 	queueName := strings.TrimPrefix(r.URL.Path, "/")
 	values := r.URL.Query()
 
 	result := a.storage.Get(queueName)
+
 	if result == "" && values.Has(timeoutKey) {
 		ctx := r.Context()
 		secStr := values.Get(timeoutKey)
@@ -117,23 +121,23 @@ func (a *api) getFromQueue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		elem := a.storage.GetChan(queueName)
-		defer a.storage.RemoveFromWait(queueName, elem)
-		ch := elem.Value.(chan string)
-		defer close(ch)
+		ch := make(chan string)
+		elem := a.storage.AddToWaitQueue(queueName, ch)
+		defer a.storage.RemoveFromWaitQueue(queueName, elem)
 
-		timer := time.NewTimer(time.Duration(dur) * time.Second)
+		reqTimer := time.NewTimer(time.Duration(dur) * time.Second)
 		for {
 			select {
-			case result := <-ch: // don't need to check if channel closed, because after two possible closes in this function it returns
+			case item := <-ch: // don't need to check if channel closed, because after two possible closes in this function it returns
 				log.Println("got item")
-				w.Write([]byte(result))
+				w.Write([]byte(item))
 				return
-			case <-timer.C:
+			case <-reqTimer.C:
 				log.Println("time is out")
 				w.WriteHeader(http.StatusNotFound)
 				return
 			case <-ctx.Done():
+				log.Printf("request canceled by client, cause: %s\n", context.Cause(ctx))
 				return
 			case <-a.cancelCh:
 				log.Println("received signal to stop server")
