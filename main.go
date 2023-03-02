@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
-	"rest-queue/storage"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -33,8 +37,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	s := storage.New()
 	api := &api{
-		storage,
+		s,
+		make(chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -47,7 +53,28 @@ func main() {
 		IdleTimeout: time.Duration(10) * time.Second,
 	}
 
-	log.Fatal(srv.ListenAndServe())
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	// graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	log.Println("\nreceived interrupt signal, stopping server")
+	close(api.cancelCh)
+	timeout, cancel := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(timeout); err != nil {
+		log.Printf("can't shutdown http server: %s", err)
+	}
+}
+
+type api struct {
+	storage  *storage.Store
+	cancelCh chan struct{}
 }
 
 func (a *api) queryHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +134,11 @@ func (a *api) getFromQueue(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			case <-ctx.Done():
-				log.Println("request canceled by client")
+				return
+			case <-a.cancelCh:
+				log.Println("received signal to stop server")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("server closed"))
 				return
 			}
 		}
