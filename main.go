@@ -124,8 +124,9 @@ func (a *api) getFromQueue(w http.ResponseWriter, r *http.Request) {
 		ch := make(chan string)
 		elem := a.storage.AddToWaitQueue(queueName, ch)
 		defer a.storage.RemoveFromWaitQueue(queueName, elem)
-
 		reqTimer := time.NewTimer(time.Duration(dur) * time.Second)
+		defer reqTimer.Stop()
+
 		for {
 			select {
 			case item := <-ch: // don't need to check if channel closed, because after two possible closes in this function it returns
