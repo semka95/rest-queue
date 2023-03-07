@@ -129,7 +129,7 @@ func (a *api) getFromQueue(w http.ResponseWriter, r *http.Request) {
 
 		for {
 			select {
-			case item := <-ch: // don't need to check if channel closed, because after two possible closes in this function it returns
+			case item := <-ch:
 				log.Println("got item")
 				w.Write([]byte(item))
 				return
